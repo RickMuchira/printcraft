@@ -1,5 +1,5 @@
-// lib/api.ts - API client for backend communication
-const API_BASE_URL = 'http://localhost:8000/api'
+// lib/api.ts - Fixed API client for backend communication
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api'
 
 // Types matching backend schemas
 export interface Category {
@@ -82,17 +82,65 @@ class PrintCraftAPI {
     this.baseURL = baseURL
   }
 
-  // Categories
-  async getCategories(): Promise<Category[]> {
-    const response = await fetch(`${this.baseURL}/categories/`)
-    if (!response.ok) throw new Error('Failed to fetch categories')
+  // Helper method for handling API errors
+  private async handleResponse(response: Response) {
+    if (!response.ok) {
+      let errorMessage = `HTTP error! status: ${response.status}`
+      
+      try {
+        const errorData = await response.json()
+        errorMessage = errorData.detail || errorData.message || errorMessage
+      } catch {
+        // If we can't parse JSON, use the status text
+        errorMessage = response.statusText || errorMessage
+      }
+      
+      throw new Error(errorMessage)
+    }
     return response.json()
   }
 
+  // Helper method for making requests with timeout and better error handling
+  private async fetchWithTimeout(url: string, options: RequestInit = {}, timeout: number = 30000) {
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), timeout)
+    
+    try {
+      const response = await fetch(url, {
+        ...options,
+        signal: controller.signal,
+        headers: {
+          ...options.headers,
+        }
+      })
+      
+      clearTimeout(timeoutId)
+      return response
+    } catch (error) {
+      clearTimeout(timeoutId)
+      
+      if (error instanceof Error) {
+        if (error.name === 'AbortError') {
+          throw new Error('Request timeout - please check your connection and try again')
+        }
+        if (error.message.includes('fetch')) {
+          throw new Error('Failed to connect to server - please ensure the backend is running on http://localhost:8000')
+        }
+      }
+      
+      throw error
+    }
+  }
+
+  // Categories
+  async getCategories(): Promise<Category[]> {
+    const response = await this.fetchWithTimeout(`${this.baseURL}/categories/`)
+    return this.handleResponse(response)
+  }
+
   async getCategory(id: number): Promise<Category> {
-    const response = await fetch(`${this.baseURL}/categories/${id}`)
-    if (!response.ok) throw new Error('Failed to fetch category')
-    return response.json()
+    const response = await this.fetchWithTimeout(`${this.baseURL}/categories/${id}`)
+    return this.handleResponse(response)
   }
 
   async createCategory(
@@ -105,13 +153,39 @@ class PrintCraftAPI {
     if (description) formData.append('description', description)
     if (image) formData.append('image', image)
 
-    const response = await fetch(`${this.baseURL}/categories/`, {
+    const response = await this.fetchWithTimeout(`${this.baseURL}/categories/`, {
       method: 'POST',
       body: formData,
     })
 
-    if (!response.ok) throw new Error('Failed to create category')
-    return response.json()
+    return this.handleResponse(response)
+  }
+
+  async updateCategory(
+    id: number,
+    name: string,
+    description?: string,
+    image?: File
+  ): Promise<Category> {
+    const formData = new FormData()
+    formData.append('name', name)
+    if (description) formData.append('description', description)
+    if (image) formData.append('image', image)
+
+    const response = await this.fetchWithTimeout(`${this.baseURL}/categories/${id}`, {
+      method: 'PUT',
+      body: formData,
+    })
+
+    return this.handleResponse(response)
+  }
+
+  async deleteCategory(id: number): Promise<{ message: string }> {
+    const response = await this.fetchWithTimeout(`${this.baseURL}/categories/${id}`, {
+      method: 'DELETE',
+    })
+
+    return this.handleResponse(response)
   }
 
   // Products
@@ -127,15 +201,13 @@ class PrintCraftAPI {
     if (filters?.skip) params.append('skip', filters.skip.toString())
     if (filters?.limit) params.append('limit', filters.limit.toString())
 
-    const response = await fetch(`${this.baseURL}/products/?${params}`)
-    if (!response.ok) throw new Error('Failed to fetch products')
-    return response.json()
+    const response = await this.fetchWithTimeout(`${this.baseURL}/products/?${params}`)
+    return this.handleResponse(response)
   }
 
   async getProduct(id: number): Promise<Product> {
-    const response = await fetch(`${this.baseURL}/products/${id}`)
-    if (!response.ok) throw new Error('Failed to fetch product')
-    return response.json()
+    const response = await this.fetchWithTimeout(`${this.baseURL}/products/${id}`)
+    return this.handleResponse(response)
   }
 
   async uploadProduct(
@@ -171,66 +243,67 @@ class PrintCraftAPI {
     formData.append('main_image', files.main_image)
     
     if (files.gallery_images) {
-      files.gallery_images.forEach(file => formData.append('gallery_images', file))
+      files.gallery_images.forEach(image => {
+        formData.append('gallery_images', image)
+      })
     }
     
     if (files.design_template) formData.append('design_template', files.design_template)
     if (files.mockup_front) formData.append('mockup_front', files.mockup_front)
     if (files.mockup_back) formData.append('mockup_back', files.mockup_back)
 
-    const response = await fetch(`${this.baseURL}/products/upload`, {
+    const response = await this.fetchWithTimeout(`${this.baseURL}/products/upload`, {
       method: 'POST',
       body: formData,
-    })
+    }, 60000) // Longer timeout for file uploads
 
-    if (!response.ok) {
-      const errorData = await response.json()
-      throw new Error(errorData.detail || 'Failed to upload product')
-    }
-
-    return response.json()
+    return this.handleResponse(response)
   }
 
   async toggleProductActive(id: number): Promise<{ message: string }> {
-    const response = await fetch(`${this.baseURL}/products/${id}/toggle-active`, {
+    const response = await this.fetchWithTimeout(`${this.baseURL}/products/${id}/toggle-active`, {
       method: 'PUT',
     })
-    if (!response.ok) throw new Error('Failed to toggle product status')
-    return response.json()
+
+    return this.handleResponse(response)
   }
 
   async toggleProductFeatured(id: number): Promise<{ message: string }> {
-    const response = await fetch(`${this.baseURL}/products/${id}/toggle-featured`, {
+    const response = await this.fetchWithTimeout(`${this.baseURL}/products/${id}/toggle-featured`, {
       method: 'PUT',
     })
-    if (!response.ok) throw new Error('Failed to toggle product featured status')
-    return response.json()
+
+    return this.handleResponse(response)
   }
 
-  // Utility
+  // Utility endpoints
   async getStats(): Promise<{
     total_categories: number
     total_products: number
     featured_products: number
     timestamp: string
   }> {
-    const response = await fetch(`${this.baseURL}/stats`)
-    if (!response.ok) throw new Error('Failed to fetch stats')
-    return response.json()
+    const response = await this.fetchWithTimeout(`${this.baseURL}/stats`)
+    return this.handleResponse(response)
   }
 
   async seedCategories(): Promise<{ message: string; categories: string[] }> {
-    const response = await fetch(`${this.baseURL}/dev/seed-categories`, {
+    const response = await this.fetchWithTimeout(`${this.baseURL}/dev/seed-categories`, {
       method: 'POST',
     })
-    if (!response.ok) throw new Error('Failed to seed categories')
-    return response.json()
+
+    return this.handleResponse(response)
+  }
+
+  // Health check
+  async healthCheck(): Promise<{ status: string; timestamp: string }> {
+    const response = await this.fetchWithTimeout(`${this.baseURL.replace('/api', '')}/health`)
+    return this.handleResponse(response)
   }
 }
 
+// Export singleton instance
 export const api = new PrintCraftAPI()
 
-// Hook for using the API with React Query (optional but recommended)
-export const useAPI = () => {
-  return api
-} 
+// Export class for custom instances
+export { PrintCraftAPI }

@@ -9,8 +9,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Upload, X, Plus, Trash2 } from 'lucide-react'
-import { api, Category, ProductUploadData, PrintArea } from '@/lib/api'
+import { Upload, X, Plus, Trash2, Loader2, ArrowRight, ArrowLeft, Image, CheckCircle, AlertCircle } from 'lucide-react'
+import { api, Category, ProductUploadData } from '@/lib/api'
 import { useToast } from '@/hooks/use-toast'
 
 interface FilePreview {
@@ -18,46 +18,57 @@ interface FilePreview {
   url: string
 }
 
-const SIZE_OPTIONS = ['XS', 'S', 'M', 'L', 'XL', 'XXL'];
-const COLOR_OPTIONS = ['Red', 'Blue', 'Green', 'Black', 'White', 'Yellow'];
-const MATERIAL_OPTIONS = ['Cotton', 'Polyester', 'Wool', 'Silk', 'Leather'];
+interface ProductVariant {
+  color: string
+  size: string
+  material: string
+  price: number
+  stock: number
+  sku: string
+}
 
-export function ProductUploadForm() {
+const SIZE_OPTIONS = ['XS', 'S', 'M', 'L', 'XL', 'XXL'];
+const COLOR_OPTIONS = ['Red', 'Blue', 'Green', 'Black', 'White', 'Yellow', 'Orange', 'Purple', 'Pink', 'Gray'];
+const MATERIAL_OPTIONS = ['100% Cotton', 'Polyester', 'Cotton Blend', 'Premium Cotton', 'Organic Cotton'];
+
+export default function ProductUploadForm() {
   const { toast } = useToast()
   const [categories, setCategories] = useState<Category[]>([])
   const [loading, setLoading] = useState(false)
   const [uploading, setUploading] = useState(false)
+  const [currentStep, setCurrentStep] = useState(1)
 
   // Form data
-  const [formData, setFormData] = useState<ProductUploadData>({
+  const [formData, setFormData] = useState({
     name: '',
     description: '',
-    base_price: 0,
-    min_order_quantity: 1,
     category_id: 0,
-    sizes: [],
-    colors: [],
-    materials: [],
-    customization_options: {},
-    print_areas: []
   })
 
-  // File uploads
+  // Product specifications
+  const [selectedSizes, setSelectedSizes] = useState<string[]>([])
+  const [selectedColors, setSelectedColors] = useState<string[]>([])
+  const [selectedMaterials, setSelectedMaterials] = useState<string[]>([])
+
+  // Images
   const [mainImage, setMainImage] = useState<FilePreview | null>(null)
-  const [galleryImages, setGalleryImages] = useState<FilePreview[]>([])
-  const [designTemplate, setDesignTemplate] = useState<FilePreview | null>(null)
   const [mockupFront, setMockupFront] = useState<FilePreview | null>(null)
   const [mockupBack, setMockupBack] = useState<FilePreview | null>(null)
 
-  // Dynamic arrays
-  const [currentSize, setCurrentSize] = useState('')
-  const [currentColor, setCurrentColor] = useState('')
-  const [currentMaterial, setCurrentMaterial] = useState('')
+  // Variants (simplified)
+  const [variants, setVariants] = useState<ProductVariant[]>([])
 
   // Load categories on mount
   useEffect(() => {
     loadCategories()
   }, [])
+
+  // Auto-generate variants when specifications change
+  useEffect(() => {
+    if (selectedColors.length > 0 && selectedSizes.length > 0 && selectedMaterials.length > 0) {
+      generateVariants()
+    }
+  }, [selectedColors, selectedSizes, selectedMaterials])
 
   const loadCategories = async () => {
     try {
@@ -75,113 +86,114 @@ export function ProductUploadForm() {
     }
   }
 
-  const handleFileUpload = (file: File, type: 'main' | 'gallery' | 'template' | 'mockup_front' | 'mockup_back') => {
+  const generateVariants = () => {
+    const newVariants: ProductVariant[] = []
+    
+    selectedColors.forEach(color => {
+      selectedSizes.forEach(size => {
+        selectedMaterials.forEach(material => {
+          newVariants.push({
+            color,
+            size,
+            material,
+            price: 0,
+            stock: 0,
+            sku: `${formData.name.replace(/\s+/g, '-').toLowerCase()}-${color.toLowerCase()}-${size.toLowerCase()}-${material.toLowerCase()}`
+          })
+        })
+      })
+    })
+    
+    setVariants(newVariants)
+  }
+
+  const updateVariant = (index: number, field: keyof ProductVariant, value: any) => {
+    setVariants(prev => prev.map((variant, i) => 
+      i === index ? { ...variant, [field]: value } : variant
+    ))
+  }
+
+  const removeVariant = (index: number) => {
+    setVariants(prev => prev.filter((_, i) => i !== index))
+        }
+
+  const handleImageUpload = (file: File, type: 'mainImage' | 'mockupFront' | 'mockupBack') => {
     const url = URL.createObjectURL(file)
     const preview = { file, url }
 
-    switch (type) {
-      case 'main':
-        if (mainImage) URL.revokeObjectURL(mainImage.url)
-        setMainImage(preview)
-        break
-      case 'gallery':
-        setGalleryImages(prev => [...prev, preview])
-        break
-      case 'template':
-        if (designTemplate) URL.revokeObjectURL(designTemplate.url)
-        setDesignTemplate(preview)
-        break
-      case 'mockup_front':
-        if (mockupFront) URL.revokeObjectURL(mockupFront.url)
-        setMockupFront(preview)
-        break
-      case 'mockup_back':
-        if (mockupBack) URL.revokeObjectURL(mockupBack.url)
-        setMockupBack(preview)
-        break
+    // Clean up old image URL
+    if (type === 'mainImage' && mainImage) URL.revokeObjectURL(mainImage.url)
+    if (type === 'mockupFront' && mockupFront) URL.revokeObjectURL(mockupFront.url)
+    if (type === 'mockupBack' && mockupBack) URL.revokeObjectURL(mockupBack.url)
+
+    if (type === 'mainImage') setMainImage(preview)
+    if (type === 'mockupFront') setMockupFront(preview)
+    if (type === 'mockupBack') setMockupBack(preview)
+  }
+
+  const removeImage = (type: 'mainImage' | 'mockupFront' | 'mockupBack') => {
+    if (type === 'mainImage' && mainImage) {
+      URL.revokeObjectURL(mainImage.url)
+      setMainImage(null)
+    }
+    if (type === 'mockupFront' && mockupFront) {
+      URL.revokeObjectURL(mockupFront.url)
+      setMockupFront(null)
+    }
+    if (type === 'mockupBack' && mockupBack) {
+      URL.revokeObjectURL(mockupBack.url)
+      setMockupBack(null)
     }
   }
 
-  const removeFile = (type: 'main' | 'template' | 'mockup_front' | 'mockup_back', index?: number) => {
-    switch (type) {
-      case 'main':
-        if (mainImage) {
-          URL.revokeObjectURL(mainImage.url)
-          setMainImage(null)
+  // Validation for each step
+  const getStepValidation = (step: number) => {
+    switch (step) {
+      case 1:
+        return {
+          isValid: formData.name && formData.category_id,
+          missing: []
         }
-        break
-      case 'template':
-        if (designTemplate) {
-          URL.revokeObjectURL(designTemplate.url)
-          setDesignTemplate(null)
+      case 2:
+        const missing = []
+        if (selectedSizes.length === 0) missing.push('sizes')
+        if (selectedColors.length === 0) missing.push('colors')
+        if (selectedMaterials.length === 0) missing.push('materials')
+        return {
+          isValid: selectedSizes.length > 0 && selectedColors.length > 0 && selectedMaterials.length > 0,
+          missing
         }
-        break
-      case 'mockup_front':
-        if (mockupFront) {
-          URL.revokeObjectURL(mockupFront.url)
-          setMockupFront(null)
+      case 3:
+        const imageMissing = []
+        if (!mainImage) imageMissing.push('main image')
+        if (!mockupFront) imageMissing.push('front mockup')
+        if (!mockupBack) imageMissing.push('back mockup')
+        return {
+          isValid: mainImage && mockupFront && mockupBack,
+          missing: imageMissing
         }
-        break
-      case 'mockup_back':
-        if (mockupBack) {
-          URL.revokeObjectURL(mockupBack.url)
-          setMockupBack(null)
+      case 4:
+        const invalidVariants = variants.filter(v => v.price <= 0 || v.stock < 0)
+        return {
+          isValid: variants.length > 0 && invalidVariants.length === 0,
+          missing: invalidVariants.length > 0 ? ['variant prices/stock'] : []
         }
-        break
+      default:
+        return { isValid: false, missing: [] }
     }
   }
 
-  const removeGalleryImage = (index: number) => {
-    const imageToRemove = galleryImages[index]
-    URL.revokeObjectURL(imageToRemove.url)
-    setGalleryImages(prev => prev.filter((_, i) => i !== index))
+  const canProceedToStep = (step: number) => {
+    return getStepValidation(step).isValid
   }
 
-  const addToArray = (type: 'sizes' | 'colors' | 'materials', value: string) => {
-    if (!value.trim()) return
-
-    setFormData(prev => ({
-      ...prev,
-      [type]: [...(prev[type] || []), value.trim()]
-    }))
-
-    // Clear input
-    switch (type) {
-      case 'sizes':
-        setCurrentSize('')
-        break
-      case 'colors':
-        setCurrentColor('')
-        break
-      case 'materials':
-        setCurrentMaterial('')
-        break
-    }
-  }
-
-  const removeFromArray = (type: 'sizes' | 'colors' | 'materials', index: number) => {
-    setFormData(prev => ({
-      ...prev,
-      [type]: prev[type]?.filter((_, i) => i !== index) || []
-    }))
-  }
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-
-    if (!mainImage) {
+  // Handle form submission
+  const handleSubmit = async () => {
+    const validation = getStepValidation(4)
+    if (!validation.isValid) {
       toast({
         title: "Error",
-        description: "Main image is required",
-        variant: "destructive"
-      })
-      return
-    }
-
-    if (!formData.category_id) {
-      toast({
-        title: "Error",
-        description: "Please select a category",
+        description: "Please complete all required fields",
         variant: "destructive"
       })
       return
@@ -190,15 +202,29 @@ export function ProductUploadForm() {
     try {
       setUploading(true)
 
-      const files = {
-        main_image: mainImage.file,
-        gallery_images: galleryImages.map(img => img.file),
-        design_template: designTemplate?.file,
-        mockup_front: mockupFront?.file,
-        mockup_back: mockupBack?.file,
+      // Calculate base price (lowest price among all variants)
+      const allPrices = variants.map(v => v.price).filter(price => price > 0)
+      const basePrice = allPrices.length > 0 ? Math.min(...allPrices) : 0
+
+      const productData: ProductUploadData = {
+        name: formData.name,
+        description: formData.description,
+        base_price: basePrice,
+        min_order_quantity: 1,
+        category_id: formData.category_id,
+        sizes: selectedSizes,
+        colors: selectedColors,
+        materials: selectedMaterials,
+        variants
       }
 
-      const result = await api.uploadProduct(formData, files)
+      const files = {
+        main_image: mainImage!.file,
+        mockup_front: mockupFront!.file,
+        mockup_back: mockupBack!.file,
+      }
+
+      const result = await api.uploadProduct(productData, files)
 
       toast({
         title: "Success",
@@ -206,31 +232,21 @@ export function ProductUploadForm() {
       })
 
       // Reset form
-      setFormData({
-        name: '',
-        description: '',
-        base_price: 0,
-        min_order_quantity: 1,
-        category_id: 0,
-        sizes: [],
-        colors: [],
-        materials: [],
-        customization_options: {},
-        print_areas: []
-      })
-
-      // Clear files
+      setFormData({ name: '', description: '', category_id: 0 })
+      setSelectedSizes([])
+      setSelectedColors([])
+      setSelectedMaterials([])
+      setVariants([])
+      
+      // Clean up image URLs
       if (mainImage) URL.revokeObjectURL(mainImage.url)
-      if (designTemplate) URL.revokeObjectURL(designTemplate.url)
       if (mockupFront) URL.revokeObjectURL(mockupFront.url)
       if (mockupBack) URL.revokeObjectURL(mockupBack.url)
-      galleryImages.forEach(img => URL.revokeObjectURL(img.url))
-
       setMainImage(null)
-      setGalleryImages([])
-      setDesignTemplate(null)
       setMockupFront(null)
       setMockupBack(null)
+      
+      setCurrentStep(1)
 
     } catch (error) {
       toast({
@@ -243,53 +259,51 @@ export function ProductUploadForm() {
     }
   }
 
-  const FileUploadCard = ({ 
+  const ImageUploadCard = ({ 
     title, 
     file, 
     onUpload, 
     onRemove, 
-    accept = "image/*",
     required = false 
   }: {
     title: string
     file: FilePreview | null
     onUpload: (file: File) => void
     onRemove: () => void
-    accept?: string
     required?: boolean
   }) => (
-    <Card>
-      <CardHeader className="pb-3">
+    <Card className="h-48">
+      <CardHeader className="pb-2">
         <CardTitle className="text-sm">
           {title} {required && <span className="text-red-500">*</span>}
         </CardTitle>
       </CardHeader>
-      <CardContent>
+      <CardContent className="h-32">
         {file ? (
-          <div className="relative">
+          <div className="relative h-full">
             <img 
               src={file.url} 
               alt={title}
-              className="w-full h-32 object-cover rounded-md"
+              className="w-full h-full object-cover rounded-md"
             />
             <Button
               type="button"
               variant="destructive"
               size="sm"
-              className="absolute top-2 right-2"
+              className="absolute top-1 right-1"
               onClick={onRemove}
             >
-              <X className="h-4 w-4" />
+              <X className="h-3 w-3" />
             </Button>
           </div>
         ) : (
-          <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed rounded-md cursor-pointer hover:bg-gray-50">
-            <Upload className="h-8 w-8 text-gray-400 mb-2" />
-            <span className="text-sm text-gray-500">Click to upload</span>
+          <label className="flex flex-col items-center justify-center w-full h-full border-2 border-dashed rounded-md cursor-pointer hover:bg-gray-50">
+            <Upload className="h-6 w-6 text-gray-400 mb-1" />
+            <span className="text-xs text-gray-500 text-center">Click to upload</span>
             <input
               type="file"
               className="hidden"
-              accept={accept}
+              accept="image/*"
               onChange={(e) => {
                 const file = e.target.files?.[0]
                 if (file) onUpload(file)
@@ -301,326 +315,360 @@ export function ProductUploadForm() {
     </Card>
   )
 
+  const StepIndicator = () => {
+    const steps = [
+      { number: 1, title: 'Basic Info' },
+      { number: 2, title: 'Specifications' },
+      { number: 3, title: 'Images' },
+      { number: 4, title: 'Variants & Pricing' }
+    ]
+
+    return (
+      <div className="mb-8">
+          <div className="flex items-center justify-between">
+          {steps.map((step, index) => {
+            const validation = getStepValidation(step.number)
+            const isCompleted = currentStep > step.number
+            const isCurrent = currentStep === step.number
+            
+                return (
+              <div key={step.number} className="flex items-center">
+                <div className={`w-10 h-10 rounded-full flex items-center justify-center font-medium ${
+                  isCompleted ? 'bg-green-500 text-white' :
+                  isCurrent ? 'bg-blue-500 text-white' : 
+                  'bg-gray-200 text-gray-600'
+                }`}>
+                  {isCompleted ? <CheckCircle className="h-5 w-5" /> : step.number}
+                </div>
+                <div className="ml-3">
+                  <span className="font-medium text-sm">
+                    {step.title}
+                  </span>
+                  {isCurrent && !validation.isValid && validation.missing.length > 0 && (
+                    <div className="text-xs text-red-500 mt-1">
+                      Missing: {validation.missing.join(', ')}
+            </div>
+          )}
+          </div>
+                {index < steps.length - 1 && (
+                  <ArrowRight className="h-4 w-4 mx-4 text-gray-400" />
+                )}
+            </div>
+            )
+          })}
+            </div>
+          </div>
+    )
+  }
+
   return (
-    <div className="max-w-4xl mx-auto p-6">
+    <div className="max-w-6xl mx-auto p-6">
       <h1 className="text-3xl font-bold mb-6">Upload New Product</h1>
 
-      <form onSubmit={handleSubmit} className="space-y-6">
-        <Tabs defaultValue="basic" className="w-full">
-          <TabsList className="grid w-full grid-cols-4">
-            <TabsTrigger value="basic">Basic Info</TabsTrigger>
-            <TabsTrigger value="specifications">Specifications</TabsTrigger>
-            <TabsTrigger value="files">Files</TabsTrigger>
-            <TabsTrigger value="preview">Preview</TabsTrigger>
-          </TabsList>
+      <StepIndicator />
 
-          <TabsContent value="basic" className="space-y-4">
-            <Card>
-              <CardHeader>
-                <CardTitle>Basic Information</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div>
-                  <Label htmlFor="name">Product Name *</Label>
-                  <Input
-                    id="name"
-                    value={formData.name}
-                    onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
-                    required
-                  />
-                </div>
-
-                <div>
-                  <Label htmlFor="description">Description</Label>
-                  <Textarea
-                    id="description"
-                    value={formData.description}
-                    onChange={(e) => setFormData(prev => ({ ...prev, description: e.target.value }))}
-                    rows={3}
-                  />
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <Label htmlFor="price">Base Price (KSh) *</Label>
-                    <Input
-                      id="price"
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      value={formData.base_price}
-                      onChange={(e) => setFormData(prev => ({ ...prev, base_price: parseFloat(e.target.value) || 0 }))}
-                      required
-                    />
-                  </div>
-
-                  <div>
-                    <Label htmlFor="min_order">Minimum Order Quantity *</Label>
-                    <Input
-                      id="min_order"
-                      type="number"
-                      min="1"
-                      value={formData.min_order_quantity}
-                      onChange={(e) => setFormData(prev => ({ ...prev, min_order_quantity: parseInt(e.target.value) || 1 }))}
-                      required
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <Label htmlFor="category">Category *</Label>
-                  <Select
-                    value={formData.category_id.toString()}
-                    onValueChange={(value) => setFormData(prev => ({ ...prev, category_id: parseInt(value) }))}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select a category" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {categories.map(category => (
-                        <SelectItem key={category.id} value={category.id.toString()}>
-                          {category.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          <TabsContent value="specifications" className="space-y-4">
-            <div className="grid md:grid-cols-3 gap-4">
-              {/* Sizes */}
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-sm">Available Sizes</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-3">
-                  <div className="flex flex-col gap-2">
-                    {SIZE_OPTIONS.map(size => (
-                      <label key={size} className="flex items-center gap-2">
-                        <input
-                          type="checkbox"
-                          checked={formData.sizes?.includes(size)}
-                          onChange={e => {
-                            setFormData(prev => ({
-                              ...prev,
-                              sizes: e.target.checked
-                                ? [...(prev.sizes || []), size]
-                                : (prev.sizes || []).filter(s => s !== size)
-                            }))
-                          }}
-                        />
-                        {size}
-                      </label>
-                    ))}
-                  </div>
-                </CardContent>
-              </Card>
-
-              {/* Colors */}
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-sm">Available Colors</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-3">
-                  <div className="flex flex-col gap-2">
-                    {COLOR_OPTIONS.map(color => (
-                      <label key={color} className="flex items-center gap-2">
-                        <input
-                          type="checkbox"
-                          checked={formData.colors?.includes(color)}
-                          onChange={e => {
-                            setFormData(prev => ({
-                              ...prev,
-                              colors: e.target.checked
-                                ? [...(prev.colors || []), color]
-                                : (prev.colors || []).filter(c => c !== color)
-                            }))
-                          }}
-                        />
-                        {color}
-                      </label>
-                    ))}
-                  </div>
-                </CardContent>
-              </Card>
-
-              {/* Materials */}
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-sm">Materials</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-3">
-                  <div className="flex flex-col gap-2">
-                    {MATERIAL_OPTIONS.map(material => (
-                      <label key={material} className="flex items-center gap-2">
-                        <input
-                          type="checkbox"
-                          checked={formData.materials?.includes(material)}
-                          onChange={e => {
-                            setFormData(prev => ({
-                              ...prev,
-                              materials: e.target.checked
-                                ? [...(prev.materials || []), material]
-                                : (prev.materials || []).filter(m => m !== material)
-                            }))
-                          }}
-                        />
-                        {material}
-                      </label>
-                    ))}
-                  </div>
-                </CardContent>
-              </Card>
-            </div>
-          </TabsContent>
-
-          <TabsContent value="files" className="space-y-4">
-            <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
-              <FileUploadCard
-                title="Main Product Image"
-                file={mainImage}
-                onUpload={(file) => handleFileUpload(file, 'main')}
-                onRemove={() => removeFile('main')}
+      {/* Step 1: Basic Information */}
+      {currentStep === 1 && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Step 1: Basic Product Information</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div>
+              <Label htmlFor="name">Product Name *</Label>
+              <Input
+                id="name"
+                value={formData.name}
+                onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
+                placeholder="e.g., Premium Cotton T-Shirt"
                 required
               />
+            </div>
 
-              <FileUploadCard
-                title="Design Template (SVG)"
-                file={designTemplate}
-                onUpload={(file) => handleFileUpload(file, 'template')}
-                onRemove={() => removeFile('template')}
-                accept=".svg,image/*"
-              />
-
-              <FileUploadCard
-                title="Mockup Front"
-                file={mockupFront}
-                onUpload={(file) => handleFileUpload(file, 'mockup_front')}
-                onRemove={() => removeFile('mockup_front')}
-              />
-
-              <FileUploadCard
-                title="Mockup Back"
-                file={mockupBack}
-                onUpload={(file) => handleFileUpload(file, 'mockup_back')}
-                onRemove={() => removeFile('mockup_back')}
+            <div>
+              <Label htmlFor="description">Description</Label>
+              <Textarea
+                id="description"
+                value={formData.description}
+                onChange={(e) => setFormData(prev => ({ ...prev, description: e.target.value }))}
+                rows={3}
+                placeholder="Describe your product..."
               />
             </div>
 
-            {/* Gallery Images */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-sm">Gallery Images</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                  {galleryImages.map((img, index) => (
-                    <div key={index} className="relative">
-                      <img 
-                        src={img.url} 
-                        alt={`Gallery ${index + 1}`}
-                        className="w-full h-24 object-cover rounded-md"
-                      />
-                      <Button
-                        type="button"
-                        variant="destructive"
-                        size="sm"
-                        className="absolute top-1 right-1 h-6 w-6 p-0"
-                        onClick={() => removeGalleryImage(index)}
-                      >
-                        <X className="h-3 w-3" />
-                      </Button>
-                    </div>
+            <div>
+              <Label htmlFor="category">Category *</Label>
+              <Select
+                value={formData.category_id?.toString() || ""}
+                onValueChange={(value) => setFormData(prev => ({ ...prev, category_id: parseInt(value) }))}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select a category" />
+                </SelectTrigger>
+                <SelectContent>
+                  {categories.map(category => (
+                    <SelectItem key={category.id} value={category.id.toString()}>
+                      {category.name}
+                    </SelectItem>
                   ))}
-                  
-                  <label className="flex flex-col items-center justify-center w-full h-24 border-2 border-dashed rounded-md cursor-pointer hover:bg-gray-50">
-                    <Plus className="h-6 w-6 text-gray-400" />
-                    <span className="text-xs text-gray-500">Add Image</span>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="flex justify-end">
+              <Button
+                onClick={() => setCurrentStep(2)}
+                disabled={!canProceedToStep(1)}
+              >
+                Next: Product Specifications
+                <ArrowRight className="h-4 w-4 ml-2" />
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Step 2: Product Specifications */}
+      {currentStep === 2 && (
+          <Card>
+            <CardHeader>
+            <CardTitle>Step 2: Product Specifications</CardTitle>
+              <p className="text-sm text-gray-600">
+              Select the sizes, colors, and materials available for this product.
+              </p>
+            </CardHeader>
+          <CardContent className="space-y-6">
+            {/* Sizes */}
+            <div>
+              <Label className="text-sm font-medium">Available Sizes *</Label>
+              <div className="grid grid-cols-3 gap-2 mt-2">
+                {SIZE_OPTIONS.map(size => (
+                  <label key={size} className="flex items-center gap-2">
                     <input
-                      type="file"
-                      className="hidden"
-                      accept="image/*"
+                      type="checkbox"
+                      checked={selectedSizes.includes(size)}
                       onChange={(e) => {
-                        const file = e.target.files?.[0]
-                        if (file) handleFileUpload(file, 'gallery')
+                        if (e.target.checked) {
+                          setSelectedSizes(prev => [...prev, size])
+                        } else {
+                          setSelectedSizes(prev => prev.filter(s => s !== size))
+                        }
                       }}
                     />
+                    <span className="text-sm">{size}</span>
                   </label>
+                ))}
+              </div>
+              </div>
+
+            {/* Colors */}
+            <div>
+              <Label className="text-sm font-medium">Available Colors *</Label>
+              <div className="grid grid-cols-3 gap-2 mt-2">
+                {COLOR_OPTIONS.map(color => (
+                  <label key={color} className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={selectedColors.includes(color)}
+                      onChange={(e) => {
+                        if (e.target.checked) {
+                          setSelectedColors(prev => [...prev, color])
+                        } else {
+                          setSelectedColors(prev => prev.filter(c => c !== color))
+                        }
+                      }}
+                    />
+                    <div 
+                      className="w-4 h-4 rounded-full border border-gray-300"
+                      style={{backgroundColor: color.toLowerCase()}}
+                    ></div>
+                    <span className="text-sm">{color}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            {/* Materials */}
+            <div>
+              <Label className="text-sm font-medium">Available Materials *</Label>
+              <div className="grid grid-cols-2 gap-2 mt-2">
+                {MATERIAL_OPTIONS.map(material => (
+                  <label key={material} className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={selectedMaterials.includes(material)}
+                      onChange={(e) => {
+                        if (e.target.checked) {
+                          setSelectedMaterials(prev => [...prev, material])
+                        } else {
+                          setSelectedMaterials(prev => prev.filter(m => m !== material))
+                        }
+                      }}
+                    />
+                    <span className="text-sm">{material}</span>
+                  </label>
+                ))}
+              </div>
                 </div>
-              </CardContent>
-            </Card>
-          </TabsContent>
 
-          <TabsContent value="preview" className="space-y-4">
-            <Card>
-              <CardHeader>
-                <CardTitle>Product Preview</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-4">
-                  <div>
-                    <h3 className="font-semibold text-lg">{formData.name || 'Product Name'}</h3>
-                    <p className="text-gray-600">{formData.description || 'No description provided'}</p>
-                  </div>
-                  
-                  <div className="grid grid-cols-2 gap-4 text-sm">
-                    <div>
-                      <span className="font-medium">Price:</span> KSh {formData.base_price.toLocaleString()}
-                    </div>
-                    <div>
-                      <span className="font-medium">Min Order:</span> {formData.min_order_quantity} pcs
-                    </div>
-                    <div>
-                      <span className="font-medium">Category:</span> {categories.find(c => c.id === formData.category_id)?.name || 'Not selected'}
-                    </div>
-                  </div>
+          <div className="flex justify-between">
+            <Button
+              variant="outline"
+              onClick={() => setCurrentStep(1)}
+            >
+              <ArrowLeft className="h-4 w-4 mr-2" />
+              Back
+            </Button>
+            <Button
+              onClick={() => setCurrentStep(3)}
+              disabled={!canProceedToStep(2)}
+            >
+                Next: Upload Images
+              <ArrowRight className="h-4 w-4 ml-2" />
+            </Button>
+          </div>
+          </CardContent>
+        </Card>
+      )}
 
-                  {formData.sizes && formData.sizes.length > 0 && (
-                    <div>
-                      <span className="font-medium text-sm">Sizes:</span>
-                      <div className="flex flex-wrap gap-1 mt-1">
-                        {formData.sizes.map((size, index) => (
-                          <Badge key={index} variant="outline" className="text-xs">{size}</Badge>
+      {/* Step 3: Images */}
+      {currentStep === 3 && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Step 3: Product Images</CardTitle>
+            <p className="text-sm text-gray-600">
+              Upload high-quality images for your product. These will be used for the product listing.
+            </p>
+          </CardHeader>
+          <CardContent className="space-y-6">
+            <div className="grid grid-cols-3 gap-4">
+              <ImageUploadCard
+                title="Main Product Image"
+                file={mainImage}
+                onUpload={(file) => handleImageUpload(file, 'mainImage')}
+                onRemove={() => removeImage('mainImage')}
+                required
+              />
+              <ImageUploadCard
+                title="Front Mockup"
+                file={mockupFront}
+                onUpload={(file) => handleImageUpload(file, 'mockupFront')}
+                onRemove={() => removeImage('mockupFront')}
+                required
+              />
+              <ImageUploadCard
+                title="Back Mockup"
+                file={mockupBack}
+                onUpload={(file) => handleImageUpload(file, 'mockupBack')}
+                onRemove={() => removeImage('mockupBack')}
+                required
+              />
+            </div>
+
+            <div className="flex justify-between">
+              <Button
+                variant="outline"
+                onClick={() => setCurrentStep(2)}
+              >
+                <ArrowLeft className="h-4 w-4 mr-2" />
+                Back
+              </Button>
+              <Button
+                onClick={() => setCurrentStep(4)}
+                disabled={!canProceedToStep(3)}
+              >
+                Next: Variants & Pricing
+                <ArrowRight className="h-4 w-4 ml-2" />
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Step 4: Variants & Pricing */}
+      {currentStep === 4 && (
+          <Card>
+            <CardHeader>
+            <CardTitle>Step 4: Variants & Pricing</CardTitle>
+              <p className="text-sm text-gray-600">
+              Set prices and stock quantities for each product variant. {variants.length} variants will be created.
+              </p>
+            </CardHeader>
+          <CardContent className="space-y-6">
+            {variants.length > 0 ? (
+              <div className="space-y-4">
+                <div className="grid grid-cols-6 gap-4 font-medium text-sm text-gray-600 border-b pb-2">
+                  <div>Color</div>
+                  <div>Size</div>
+                  <div>Material</div>
+                  <div>Price ($)</div>
+                  <div>Stock</div>
+                  <div>Actions</div>
+                </div>
+
+                {variants.map((variant, index) => (
+                  <div key={index} className="grid grid-cols-6 gap-4 items-center p-3 bg-gray-50 rounded">
+                    <div className="flex items-center gap-2">
+                          <div 
+                            className="w-4 h-4 rounded-full border"
+                            style={{backgroundColor: variant.color.toLowerCase()}}
+                          ></div>
+                      <span className="text-sm">{variant.color}</span>
+                        </div>
+                    <div className="text-sm">{variant.size}</div>
+                    <div className="text-sm">{variant.material}</div>
+                    <Input
+                      type="number"
+                      step="0.01"
+                      value={variant.price}
+                      onChange={(e) => updateVariant(index, 'price', parseFloat(e.target.value) || 0)}
+                      placeholder="0.00"
+                      className="h-8"
+                    />
+                    <Input
+                      type="number"
+                      value={variant.stock}
+                      onChange={(e) => updateVariant(index, 'stock', parseInt(e.target.value) || 0)}
+                      placeholder="0"
+                      className="h-8"
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => removeVariant(index)}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                          </div>
                         ))}
                       </div>
-                    </div>
-                  )}
+            ) : (
+              <div className="text-center py-12 text-gray-500 border-2 border-dashed rounded-lg">
+                <AlertCircle className="h-12 w-12 mx-auto mb-4 text-gray-400" />
+                <p>No variants generated. Please go back and select sizes, colors, and materials.</p>
+              </div>
+            )}
 
-                  {formData.colors && formData.colors.length > 0 && (
-                    <div>
-                      <span className="font-medium text-sm">Colors:</span>
-                      <div className="flex flex-wrap gap-1 mt-1">
-                        {formData.colors.map((color, index) => (
-                          <Badge key={index} variant="outline" className="text-xs">{color}</Badge>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {mainImage && (
-                    <div>
-                      <span className="font-medium text-sm">Main Image:</span>
-                      <img 
-                        src={mainImage.url} 
-                        alt="Main product"
-                        className="w-48 h-48 object-cover rounded-md mt-2"
-                      />
-                    </div>
-                  )}
-                </div>
-              </CardContent>
-            </Card>
-          </TabsContent>
-        </Tabs>
-        <div className="flex justify-end">
-          <Button type="submit" disabled={uploading}>
-            {uploading ? 'Uploading...' : 'Upload Product'}
-          </Button>
-        </div>
-      </form>
+          <div className="flex justify-between">
+            <Button
+              variant="outline"
+                onClick={() => setCurrentStep(3)}
+            >
+              <ArrowLeft className="h-4 w-4 mr-2" />
+              Back
+            </Button>
+            <Button
+              onClick={handleSubmit}
+                disabled={uploading || !canProceedToStep(4)}
+            >
+              {uploading && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+              {uploading ? 'Uploading...' : 'Upload Product'}
+            </Button>
+          </div>
+          </CardContent>
+        </Card>
+      )}
     </div>
   )
-} 
+}

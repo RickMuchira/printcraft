@@ -1,5 +1,5 @@
 # backend/main.py
-# Simple PrintCraft Backend - Product Upload System
+# Complete PrintCraft Backend - Product Upload System
 
 from fastapi import FastAPI, File, UploadFile, Form, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
@@ -12,12 +12,13 @@ from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
 from datetime import datetime
 import os
+import re
+import time
 import uuid
 import shutil
+import json
 from pathlib import Path
 from PIL import Image
-import json
-from slugify import slugify
 
 # =============================================================================
 # DATABASE SETUP
@@ -120,9 +121,35 @@ Base.metadata.create_all(bind=engine)
 # PYDANTIC SCHEMAS (for API validation)
 # =============================================================================
 
+# Base schemas first
 class CategoryBase(BaseModel):
     name: str
     description: Optional[str] = None
+
+class ProductBase(BaseModel):
+    name: str
+    description: Optional[str] = None
+    base_price: float
+    min_order_quantity: int = 1
+    category_id: int
+
+class ProductVariantBase(BaseModel):
+    color: Optional[str] = None
+    size: Optional[str] = None
+    material: Optional[str] = None
+    price: float
+    stock: int = 0
+    sku: Optional[str] = None
+    image_url: Optional[str] = None
+
+# Response schemas - define variant response first
+class ProductVariantResponse(ProductVariantBase):
+    id: int
+    class Config:
+        from_attributes = True
+
+class ProductVariantCreate(ProductVariantBase):
+    pass
 
 class CategoryResponse(CategoryBase):
     id: int
@@ -133,13 +160,6 @@ class CategoryResponse(CategoryBase):
     
     class Config:
         from_attributes = True
-
-class ProductBase(BaseModel):
-    name: str
-    description: Optional[str] = None
-    base_price: float
-    min_order_quantity: int = 1
-    category_id: int
 
 class ProductResponse(ProductBase):
     id: int
@@ -166,24 +186,6 @@ class FileUploadResponse(BaseModel):
     filename: str
     url: str
     size: int
-
-# Pydantic Schemas for Variants
-class ProductVariantBase(BaseModel):
-    color: Optional[str] = None
-    size: Optional[str] = None
-    material: Optional[str] = None
-    price: float
-    stock: int = 0
-    sku: Optional[str] = None
-    image_url: Optional[str] = None
-
-class ProductVariantCreate(ProductVariantBase):
-    pass
-
-class ProductVariantResponse(ProductVariantBase):
-    id: int
-    class Config:
-        from_attributes = True
 
 # =============================================================================
 # FILE HANDLING UTILITIES
@@ -218,67 +220,58 @@ def validate_image_file(file: UploadFile) -> None:
             detail=f"Invalid file type. Allowed types: {', '.join(ALLOWED_EXTENSIONS)}"
         )
 
+def slugify(text: str) -> str:
+    """Generate URL-friendly slug from text"""
+    if not text:
+        return ""
+    
+    # Convert to lowercase and replace spaces/special chars with hyphens
+    slug = re.sub(r'[^\w\s-]', '', text.lower())
+    slug = re.sub(r'[-\s]+', '-', slug)
+    slug = slug.strip('-')
+    
+    return slug
+
 async def save_uploaded_file(file: UploadFile, subfolder: str) -> str:
-    """Save uploaded file and return the URL"""
-    validate_image_file(file)
+    """Save uploaded file and return the file path"""
+    # Create subfolder if it doesn't exist
+    upload_path = UPLOAD_DIR / subfolder
+    upload_path.mkdir(exist_ok=True)
     
     # Generate unique filename
     file_extension = Path(file.filename).suffix.lower()
-    unique_filename = f"{uuid.uuid4()}{file_extension}"
-    
-    # Create subfolder path
-    subfolder_path = UPLOAD_DIR / subfolder
-    subfolder_path.mkdir(exist_ok=True)
-    
-    # Full file path
-    file_path = subfolder_path / unique_filename
+    timestamp = int(time.time())
+    unique_id = str(uuid.uuid4())[:8]
+    filename = f"{timestamp}_{unique_id}{file_extension}"
+    file_path = upload_path / filename
     
     # Save file
-    with open(file_path, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
-    
-    # Optimize image if it's not SVG
-    if file_extension != ".svg":
-        optimize_image(file_path)
-    
-    # Return relative URL
-    return f"/uploads/{subfolder}/{unique_filename}"
-
-def optimize_image(file_path: Path, max_width: int = 1200, quality: int = 85) -> None:
-    """Optimize image for web usage"""
     try:
-        with Image.open(file_path) as image:
-            # Convert to RGB if necessary
-            if image.mode in ('RGBA', 'P'):
-                image = image.convert('RGB')
-            
-            # Resize if too large
-            if image.width > max_width:
-                ratio = max_width / image.width
-                new_height = int(image.height * ratio)
-                image = image.resize((max_width, new_height), Image.Resampling.LANCZOS)
-            
-            # Save optimized image
-            image.save(file_path, 'JPEG', quality=quality, optimize=True)
+        with open(file_path, "wb") as buffer:
+            content = await file.read()
+            buffer.write(content)
     except Exception as e:
-        print(f"Error optimizing image {file_path}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to save file: {str(e)}")
+    
+    # Return relative path for database storage
+    return f"{subfolder}/{filename}"
 
 # =============================================================================
-# FASTAPI APPLICATION
+# FASTAPI APP SETUP
 # =============================================================================
 
 app = FastAPI(
     title="PrintCraft API",
-    description="Backend API for PrintCraft custom printing platform",
+    description="Backend API for PrintCraft - Print on Demand Platform",
     version="1.0.0"
 )
 
-# CORS middleware
+# Configure CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],  # Frontend URLs
+    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],  # Frontend URL
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE"],
     allow_headers=["*"],
 )
 
@@ -291,7 +284,7 @@ app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
 @app.get("/")
 async def root():
-    return {"message": "PrintCraft API is running!", "version": "1.0.0"}
+    return {"message": "PrintCraft API", "version": "1.0.0"}
 
 @app.get("/health")
 async def health_check():
@@ -308,32 +301,77 @@ async def create_category(
     image: Optional[UploadFile] = File(None),
     db: Session = Depends(get_db)
 ):
-    """Create a new product category"""
+    """Create a new product category with improved validation"""
     
-    # Check if category already exists
-    existing_category = db.query(Category).filter(Category.name == name).first()
-    if existing_category:
-        raise HTTPException(status_code=400, detail="Category already exists")
+    # Validate name input
+    if not name or not name.strip():
+        raise HTTPException(status_code=400, detail="Category name cannot be empty")
     
-    # Handle image upload
+    name = name.strip()
+    
+    # Check name length
+    if len(name) < 2:
+        raise HTTPException(status_code=400, detail="Category name must be at least 2 characters long")
+    if len(name) > 100:
+        raise HTTPException(status_code=400, detail="Category name cannot exceed 100 characters")
+    
+    # Generate slug
+    slug = slugify(name)
+    if not slug:
+        raise HTTPException(status_code=400, detail="Category name must contain valid characters")
+    
+    # Check for duplicate name (case-insensitive)
+    existing_name = db.query(Category).filter(
+        func.lower(Category.name) == name.lower()
+    ).first()
+    if existing_name:
+        raise HTTPException(status_code=400, detail=f"Category '{name}' already exists")
+    
+    # Check for duplicate slug
+    existing_slug = db.query(Category).filter(Category.slug == slug).first()
+    if existing_slug:
+        # If slug exists, append a number
+        counter = 1
+        original_slug = slug
+        while existing_slug:
+            slug = f"{original_slug}-{counter}"
+            existing_slug = db.query(Category).filter(Category.slug == slug).first()
+            counter += 1
+    
+    # Handle image upload with validation
     image_url = None
     if image and image.filename:
-        image_url = await save_uploaded_file(image, "categories")
+        try:
+            validate_image_file(image)
+            image_url = await save_uploaded_file(image, "categories")
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Image upload failed: {str(e)}")
     
-    # Create category
-    category_data = {
-        "name": name,
-        "slug": slugify(name),
-        "description": description,
-        "image_url": image_url
-    }
-    
-    db_category = Category(**category_data)
-    db.add(db_category)
-    db.commit()
-    db.refresh(db_category)
-    
-    return db_category
+    # Create category with transaction
+    try:
+        category_data = {
+            "name": name,
+            "slug": slug,
+            "description": description.strip() if description else None,
+            "image_url": image_url
+        }
+        
+        db_category = Category(**category_data)
+        db.add(db_category)
+        db.commit()
+        db.refresh(db_category)
+        
+        return db_category
+        
+    except Exception as e:
+        db.rollback()
+        # Clean up uploaded image if category creation fails
+        if image_url:
+            try:
+                os.remove(UPLOAD_DIR / "categories" / Path(image_url).name)
+            except:
+                pass
+        raise HTTPException(status_code=500, detail=f"Failed to create category: {str(e)}")
 
 @app.get("/api/categories/", response_model=List[CategoryResponse])
 def get_categories(
@@ -355,6 +393,119 @@ def get_category(category_id: int, db: Session = Depends(get_db)):
     if not category:
         raise HTTPException(status_code=404, detail="Category not found")
     return category
+
+@app.put("/api/categories/{category_id}", response_model=CategoryResponse)
+async def update_category(
+    category_id: int,
+    name: str = Form(...),
+    description: Optional[str] = Form(None),
+    image: Optional[UploadFile] = File(None),
+    db: Session = Depends(get_db)
+):
+    """Update an existing category"""
+    
+    # Get existing category
+    category = db.query(Category).filter(Category.id == category_id).first()
+    if not category:
+        raise HTTPException(status_code=404, detail="Category not found")
+    
+    # Validate name input
+    if not name or not name.strip():
+        raise HTTPException(status_code=400, detail="Category name cannot be empty")
+    
+    name = name.strip()
+    
+    # Check name length
+    if len(name) < 2:
+        raise HTTPException(status_code=400, detail="Category name must be at least 2 characters long")
+    if len(name) > 100:
+        raise HTTPException(status_code=400, detail="Category name cannot exceed 100 characters")
+    
+    # Check for duplicate name (excluding current category)
+    existing_name = db.query(Category).filter(
+        func.lower(Category.name) == name.lower(),
+        Category.id != category_id
+    ).first()
+    if existing_name:
+        raise HTTPException(status_code=400, detail=f"Category '{name}' already exists")
+    
+    # Update slug if name changed
+    new_slug = category.slug
+    if category.name.lower() != name.lower():
+        new_slug = slugify(name)
+        # Check for duplicate slug (excluding current category)
+        existing_slug = db.query(Category).filter(
+            Category.slug == new_slug,
+            Category.id != category_id
+        ).first()
+        if existing_slug:
+            counter = 1
+            original_slug = new_slug
+            while existing_slug:
+                new_slug = f"{original_slug}-{counter}"
+                existing_slug = db.query(Category).filter(
+                    Category.slug == new_slug,
+                    Category.id != category_id
+                ).first()
+                counter += 1
+    
+    # Handle image upload
+    new_image_url = category.image_url
+    if image and image.filename:
+        try:
+            validate_image_file(image)
+            new_image_url = await save_uploaded_file(image, "categories")
+            # Delete old image
+            if category.image_url:
+                try:
+                    old_image_path = UPLOAD_DIR / "categories" / Path(category.image_url).name
+                    if old_image_path.exists():
+                        os.remove(old_image_path)
+                except:
+                    pass
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Image upload failed: {str(e)}")
+    
+    # Update category
+    try:
+        category.name = name
+        category.slug = new_slug
+        category.description = description.strip() if description else None
+        category.image_url = new_image_url
+        
+        db.commit()
+        db.refresh(category)
+        
+        return category
+        
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Failed to update category: {str(e)}")
+
+@app.delete("/api/categories/{category_id}")
+def delete_category(category_id: int, db: Session = Depends(get_db)):
+    """Soft delete a category (mark as inactive)"""
+    category = db.query(Category).filter(Category.id == category_id).first()
+    if not category:
+        raise HTTPException(status_code=404, detail="Category not found")
+    
+    # Check if category has active products
+    active_products = db.query(Product).filter(
+        Product.category_id == category_id,
+        Product.is_active == True
+    ).count()
+    
+    if active_products > 0:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Cannot delete category. It has {active_products} active products. Please move or deactivate products first."
+        )
+    
+    # Soft delete
+    category.is_active = False
+    db.commit()
+    
+    return {"message": "Category deleted successfully"}
 
 # =============================================================================
 # PRODUCT ENDPOINTS

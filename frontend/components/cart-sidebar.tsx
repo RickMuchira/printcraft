@@ -1,3 +1,4 @@
+// components/cart-sidebar.tsx
 "use client"
 
 import { useState } from "react"

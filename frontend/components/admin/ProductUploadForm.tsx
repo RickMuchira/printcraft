@@ -1,3 +1,4 @@
+// components/admin/ProductUploadForm.tsx
 "use client"
 
 import { useState, useEffect } from 'react'
@@ -31,7 +32,7 @@ const SIZE_OPTIONS = ['XS', 'S', 'M', 'L', 'XL', 'XXL'];
 const COLOR_OPTIONS = ['Red', 'Blue', 'Green', 'Black', 'White', 'Yellow', 'Orange', 'Purple', 'Pink', 'Gray'];
 const MATERIAL_OPTIONS = ['100% Cotton', 'Polyester', 'Cotton Blend', 'Premium Cotton', 'Organic Cotton'];
 
-export default function ProductUploadForm() {
+export default function ProductUploadForm({ onNavigate }: { onNavigate?: (page: string) => void }) {
   const { toast } = useToast()
   const [categories, setCategories] = useState<Category[]>([])
   const [loading, setLoading] = useState(false)
@@ -247,6 +248,11 @@ export default function ProductUploadForm() {
       setMockupBack(null)
       
       setCurrentStep(1)
+
+      // Redirect to products list if onNavigate is provided
+      if (onNavigate) {
+        onNavigate('products');
+      }
 
     } catch (error) {
       toast({
